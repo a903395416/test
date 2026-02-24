@@ -68,11 +68,11 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run):
         data = res_json.get('data', {})
         items = []
         
-        # 【融合技第一步：无差别地毯式搜索】
-        # 不管 NGA 怎么改版，怎么嵌套，只要数据里带有 tid 和 pid，全盘提取出来
         def extract_posts(node):
             if isinstance(node, dict):
-                if 'tid' in node and 'pid' in node:
+                # 【终极补丁】：强制要求必须包含 'content' 字段！
+                # 这样就能把那些伪装成帖子的“元数据”和“系统广告”彻底挡在门外。
+                if 'tid' in node and 'pid' in node and 'content' in node:
                     items.append(node)
                 else:
                     for v in node.values():
@@ -93,9 +93,6 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run):
             pid = post.get('pid', 0)
             authorid = post.get('authorid', '')
             
-            # 【融合技第二步：极其严格的指纹过滤】
-            # 提取出来的东西，如果它的作者 UID 不是我们要查的 UID（比如 NGA 塞的广告或徽章）
-            # 直接跳过，看都不看一眼！
             if str(authorid) != str(uid):
                 continue
                 
@@ -155,7 +152,7 @@ def main():
     if is_first_run:
         print("\n⚠️ 首次运行：为了防止 Server酱 额度耗尽，第一轮检查将只把最新的帖子写入本地，**不会推送到微信**。")
         
-    print("\n--- NGA 监控脚本 (究极融合防弹版) 已启动 ---")
+    print("\n--- NGA 监控脚本 (究极无敌防弹版) 已启动 ---")
     
     while True:
         for uid, user_name in target_users.items():
