@@ -68,23 +68,24 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run):
         data = res_json.get('data', {})
         items = []
         
-        # 【精准提取】只锁定 NGA 存放真实回复的 __R 容器
-        replies_data = data.get('__R', {})
-        
-        if isinstance(replies_data, dict):
-            post_list = replies_data.values()
-        elif isinstance(replies_data, list):
-            post_list = replies_data
-        else:
-            post_list = []
-            
-        for post in post_list:
-            if isinstance(post, dict) and 'tid' in post and 'pid' in post:
-                # 【终极防穿透】严格比对发帖人 UID，识破并丢弃所有伪装的系统广告
-                post_author_id = str(post.get('authorid', ''))
-                if post_author_id and post_author_id != str(uid):
-                    continue 
-                items.append(post)
+        # 【最终修复】：恢复地毯式提取，并将过滤逻辑嵌入其中
+        def extract_posts(node):
+            if isinstance(node, dict):
+                if 'tid' in node and 'pid' in node:
+                    # DNA 验证：提取发帖人 UID
+                    post_author_id = str(node.get('authorid', ''))
+                    # 如果节点有 authorid 且与我们要查的人不一致，说明是系统塞进来的广告伪装，直接丢弃
+                    if post_author_id != '' and post_author_id != str(uid):
+                        return 
+                    items.append(node)
+                else:
+                    for v in node.values():
+                        extract_posts(v)
+            elif isinstance(node, list):
+                for v in node:
+                    extract_posts(v)
+
+        extract_posts(data)
         
         if not items:
             print(f"[{time.strftime('%H:%M:%S')}] 💤 {user_name} 暂无新动态。")
@@ -130,7 +131,7 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run):
                     
         if new_post_count > 0 and not is_first_run:
             print(f"[{time.strftime('%H:%M:%S')}] 🔔 {user_name} 有 {new_post_count} 条新动态，已推送到微信！")
-        elif new_post_count == 0:
+        elif new_post_count == 0 and not is_first_run:
             print(f"[{time.strftime('%H:%M:%S')}] 💤 {user_name} 暂无新动态。")
                 
     except Exception as e:
@@ -150,7 +151,7 @@ def main():
     if is_first_run:
         print("\n⚠️ 首次运行：为了防止 Server酱 额度耗尽，第一轮检查将只把最新的帖子写入本地，**不会推送到微信**。")
         
-    print("\n--- NGA 监控脚本 (广告过滤纯净版) 已启动 ---")
+    print("\n--- NGA 监控脚本 (终极稳如老狗版) 已启动 ---")
     
     while True:
         for uid, user_name in target_users.items():
