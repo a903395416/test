@@ -70,13 +70,20 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run):
         
         def extract_posts(node):
             if isinstance(node, dict):
-                # 【终极补丁】：强制要求必须包含 'content' 字段！
-                # 这样就能把那些伪装成帖子的“元数据”和“系统广告”彻底挡在门外。
-                if 'tid' in node and 'pid' in node and 'content' in node:
-                    items.append(node)
-                else:
-                    for v in node.values():
-                        extract_posts(v)
+                # 【防弹机制 1】：必须包含发帖时间 (postdate)，这是真实发言的绝对标志
+                if 'tid' in node and 'pid' in node and 'content' in node and 'postdate' in node:
+                    try:
+                        # 【防弹机制 2】：过滤掉几百号的系统级假ID
+                        if int(node['tid']) > 10000 and int(node['pid']) > 10000:
+                            items.append(node)
+                    except:
+                        pass
+                
+                for k, v in node.items():
+                    # 【防弹机制 3】：绝对禁止程序进入 __T 等系统元数据文件夹！
+                    if str(k).startswith('__'):
+                        continue
+                    extract_posts(v)
             elif isinstance(node, list):
                 for v in node:
                     extract_posts(v)
@@ -152,7 +159,7 @@ def main():
     if is_first_run:
         print("\n⚠️ 首次运行：为了防止 Server酱 额度耗尽，第一轮检查将只把最新的帖子写入本地，**不会推送到微信**。")
         
-    print("\n--- NGA 监控脚本 (究极无敌防弹版) 已启动 ---")
+    print("\n--- NGA 监控脚本 (终极防弹装甲版) 已启动 ---")
     
     while True:
         for uid, user_name in target_users.items():
