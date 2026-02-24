@@ -68,14 +68,15 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run):
         data = res_json.get('data', {})
         items = []
         
-        # 【核心修复1】只在 NGA 专门存放回复的 __R (Rows) 列表中提取，不再全局瞎找
-        r_data = data.get('__R', {})
-        if isinstance(r_data, dict):
-            for k, post in r_data.items():
-                if isinstance(post, dict) and 'tid' in post and 'pid' in post:
-                    items.append(post)
-        elif isinstance(r_data, list):
-            for post in r_data:
+        # 【最终真理】不瞎找，也不死板。只提取 NGA 返回的以 "0", "1", "2" 等纯数字作为 Key 的字典
+        # 这样既能拿到所有历史发言，又能完美避开所有系统级的广告参数！
+        if isinstance(data, dict):
+            for k, post in data.items():
+                if str(k).isdigit() and isinstance(post, dict):
+                    if 'tid' in post and 'pid' in post:
+                        items.append(post)
+        elif isinstance(data, list):
+            for post in data:
                 if isinstance(post, dict) and 'tid' in post and 'pid' in post:
                     items.append(post)
         
@@ -87,12 +88,7 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run):
         for post in items:
             tid = post.get('tid', '')
             pid = post.get('pid', 0)
-            authorid = post.get('authorid', '')
             
-            # 【核心修复2】终极指纹核对：这条数据的作者 UID 必须是我们监控的 UID！
-            if str(authorid) != str(uid):
-                continue
-                
             if not tid:
                 continue
                 
@@ -120,48 +116,4 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run):
                     post_url = f"https://nga.178.com/read.php?tid={tid}&pid={pid}"
                     action = "发表了回复"
                     
-                message_content = f"你关注的用户 **{user_name}** {action}：\n\n**相关标题：** {subject}\n\n**具体内容：** {content_snippet}...\n\n[点击这里直达 NGA]({post_url})"
-                
-                if is_first_run:
-                    # 去除换行符，让终端显示更整洁
-                    print(f"    🤫 静默收录: {content_text[:20].replace(chr(10), ' ')}...")
-                else:
-                    send_to_wechat(sendkey, f"NGA更新: {user_name}", message_content)
-                    
-        if new_post_count > 0 and not is_first_run:
-            print(f"[{time.strftime('%H:%M:%S')}] 🔔 {user_name} 有 {new_post_count} 条新动态，已推送到微信！")
-        elif new_post_count == 0:
-            print(f"[{time.strftime('%H:%M:%S')}] 💤 {user_name} 暂无新动态。")
-                
-    except Exception as e:
-        print(f"[{time.strftime('%H:%M:%S')}] 网络请求发生异常: {e}")
-
-def main():
-    print("加载配置文件...")
-    config = load_config("config.json")
-    history_file = config['monitor_settings']['history_file']
-    check_interval = config['monitor_settings']['check_interval']
-    target_users = config['target_users']
-    pushed_posts = load_history(history_file)
-    
-    is_first_run = len(pushed_posts) == 0
-    
-    print(f"已加载 {len(pushed_posts)} 条历史记录。")
-    if is_first_run:
-        print("\n⚠️ 首次运行：为了防止 Server酱 额度耗尽，第一轮检查将只把最新的帖子写入本地，**不会推送到微信**。")
-        
-    print("\n--- NGA 监控脚本 (精准指纹过滤版) 已启动 ---")
-    
-    while True:
-        for uid, user_name in target_users.items():
-            print(f"[{time.strftime('%H:%M:%S')}] 正在检查: {user_name} (UID: {uid})...")
-            check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run)
-            time.sleep(5) 
-            
-        is_first_run = False 
-            
-        print(f"[{time.strftime('%H:%M:%S')}] 本轮检查完毕，等待 {check_interval} 秒...\n")
-        time.sleep(check_interval)
-
-if __name__ == "__main__":
-    main()
+                message_content = f"你关注的用户 **{user_name}** {action}：\n\n**相关
