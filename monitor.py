@@ -116,4 +116,47 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run):
                     post_url = f"https://nga.178.com/read.php?tid={tid}&pid={pid}"
                     action = "发表了回复"
                     
-                message_content = f"你关注的用户 **{user_name}** {action}：\n\n**相关
+                message_content = f"你关注的用户 **{user_name}** {action}：\n\n**相关标题：** {subject}\n\n**具体内容：** {content_snippet}...\n\n[点击这里直达 NGA]({post_url})"
+                
+                if is_first_run:
+                    print(f"    🤫 静默收录: {content_text[:20].replace(chr(10), ' ')}...")
+                else:
+                    send_to_wechat(sendkey, f"NGA更新: {user_name}", message_content)
+                    
+        if new_post_count > 0 and not is_first_run:
+            print(f"[{time.strftime('%H:%M:%S')}] 🔔 {user_name} 有 {new_post_count} 条新动态，已推送到微信！")
+        elif new_post_count == 0:
+            print(f"[{time.strftime('%H:%M:%S')}] 💤 {user_name} 暂无新动态。")
+                
+    except Exception as e:
+        print(f"[{time.strftime('%H:%M:%S')}] 网络请求发生异常: {e}")
+
+def main():
+    print("加载配置文件...")
+    config = load_config("config.json")
+    history_file = config['monitor_settings']['history_file']
+    check_interval = config['monitor_settings']['check_interval']
+    target_users = config['target_users']
+    pushed_posts = load_history(history_file)
+    
+    is_first_run = len(pushed_posts) == 0
+    
+    print(f"已加载 {len(pushed_posts)} 条历史记录。")
+    if is_first_run:
+        print("\n⚠️ 首次运行：为了防止 Server酱 额度耗尽，第一轮检查将只把最新的帖子写入本地，**不会推送到微信**。")
+        
+    print("\n--- NGA 监控脚本 (终极完美版) 已启动 ---")
+    
+    while True:
+        for uid, user_name in target_users.items():
+            print(f"[{time.strftime('%H:%M:%S')}] 正在检查: {user_name} (UID: {uid})...")
+            check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run)
+            time.sleep(5) 
+            
+        is_first_run = False 
+            
+        print(f"[{time.strftime('%H:%M:%S')}] 本轮检查完毕，等待 {check_interval} 秒...\n")
+        time.sleep(check_interval)
+
+if __name__ == "__main__":
+    main()
