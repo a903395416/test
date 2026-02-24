@@ -70,18 +70,20 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run):
         
         def extract_posts(node):
             if isinstance(node, dict):
-                # 【防弹机制 1】：必须包含发帖时间 (postdate)，这是真实发言的绝对标志
-                if 'tid' in node and 'pid' in node and 'content' in node and 'postdate' in node:
+                # 【核心逻辑】：不管藏在多深，真实的帖子一定会带 content (哪怕内容为空)
+                if 'tid' in node and 'pid' in node and 'content' in node:
                     try:
-                        # 【防弹机制 2】：过滤掉几百号的系统级假ID
-                        if int(node['tid']) > 10000 and int(node['pid']) > 10000:
+                        t = int(node['tid'])
+                        p = int(node['pid'])
+                        # 过滤掉广告(tid极小)。允许主帖(pid=0)或正常回复(pid极大数据)
+                        if t > 10000 and (p == 0 or p > 10000):
                             items.append(node)
                     except:
                         pass
                 
                 for k, v in node.items():
-                    # 【防弹机制 3】：绝对禁止程序进入 __T 等系统元数据文件夹！
-                    if str(k).startswith('__'):
+                    # 【最高防御】：绝对禁止程序扫描 NGA 的系统元数据文件夹(__)和全局广告(GLOBAL)
+                    if str(k).startswith('__') or str(k).upper() == 'GLOBAL':
                         continue
                     extract_posts(v)
             elif isinstance(node, list):
@@ -100,10 +102,8 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run):
             pid = post.get('pid', 0)
             authorid = post.get('authorid', '')
             
+            # 【最后把关】：UID 必须绝对匹配！
             if str(authorid) != str(uid):
-                continue
-                
-            if not tid:
                 continue
                 
             raw_subject = post.get('subject', '')
@@ -159,7 +159,7 @@ def main():
     if is_first_run:
         print("\n⚠️ 首次运行：为了防止 Server酱 额度耗尽，第一轮检查将只把最新的帖子写入本地，**不会推送到微信**。")
         
-    print("\n--- NGA 监控脚本 (终极防弹装甲版) 已启动 ---")
+    print("\n--- NGA 监控脚本 (完美剥离元数据版) 已启动 ---")
     
     while True:
         for uid, user_name in target_users.items():
