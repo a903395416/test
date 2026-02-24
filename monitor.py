@@ -36,13 +36,13 @@ def send_to_wechat(sendkey, title, content):
         print(f"[{time.strftime('%H:%M:%S')}] 微信推送失败: {e}")
 
 def clean_html_tags(text):
-    """清理 NGA 返回数据中可能夹带的 HTML 标签"""
     cleanr = re.compile('<.*?>')
     cleantext = re.sub(cleanr, '', str(text))
     return cleantext.replace('&nbsp;', ' ').replace('&#39;', "'").strip()
 
-def check_nga_user_posts(uid, user_name, config, pushed_posts):
-    url = f"https://nga.178.com/nuke.php?__output=11&func=search&authorid={uid}"
+def check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run):
+    # 【核心修复】改为 NGA 官方的“用户历史回复”接口
+    url = f"https://nga.178.com/thread.php?authorid={uid}&searchpost=1&__output=11"
     
     headers = {
         "User-Agent": config['nga_settings']['user_agent'],
@@ -61,18 +61,14 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts):
         try:
             res_json = response.json()
         except Exception as e:
-            with open(f"debug_非JSON结果_UID_{uid}.txt", "w", encoding="utf-8") as f:
-                f.write(response.text)
-            print(f"[{time.strftime('%H:%M:%S')}] ⚠️ API返回了非JSON格式，已保存至 debug 文件。")
+            print(f"[{time.strftime('%H:%M:%S')}] ⚠️ API返回了非JSON格式，可能是 Cookie 失效或触发了验证码。")
             return
         
         data = res_json.get('data', {})
         items = []
         
-        # 【核心强化】使用递归函数提取所有包含 tid 的字典，无视任何类型错误
         def extract_posts(node):
             if isinstance(node, dict):
-                # 如果这个字典里有 tid 和 pid，说明它是一个帖子
                 if 'tid' in node and 'pid' in node:
                     items.append(node)
                 else:
@@ -85,19 +81,10 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts):
         extract_posts(data)
         
         if not items:
-            # 如果没找到帖子，尝试分析并提取 NGA 返回的错误文本
-            error_msg = ""
-            if isinstance(data, list) and len(data) > 0 and isinstance(data[0], str):
-                error_msg = data[0]
-            elif isinstance(data, dict) and isinstance(data.get('0'), str):
-                error_msg = data.get('0')
-            
-            if error_msg:
-                print(f"[{time.strftime('%H:%M:%S')}] ⚠️ NGA拦截 [{user_name}]: {clean_html_tags(error_msg)}")
-            else:
-                print(f"[{time.strftime('%H:%M:%S')}] 💤 {user_name} 暂无新动态。")
+            print(f"[{time.strftime('%H:%M:%S')}] 💤 {user_name} 暂无新动态。")
             return
             
+        new_post_count = 0
         for post in items:
             tid = post.get('tid', '')
             pid = post.get('pid', 0)
@@ -113,6 +100,7 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts):
             if post_id not in pushed_posts:
                 pushed_posts.add(post_id)
                 save_history(history_file, post_id)
+                new_post_count += 1
                 
                 if str(pid) == "0":
                     post_url = f"https://nga.178.com/read.php?tid={tid}"
@@ -123,7 +111,15 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts):
                     
                 message_content = f"你关注的用户 **{user_name}** {action}：\n\n**标题：** {subject}\n\n**内容摘要：** {content_snippet}...\n\n[点击这里直达 NGA]({post_url})"
                 
-                send_to_wechat(sendkey, f"NGA更新: {user_name}", message_content)
+                if is_first_run:
+                    print(f"    🤫 静默收录历史发言: {subject[:15]}...")
+                else:
+                    send_to_wechat(sendkey, f"NGA更新: {user_name}", message_content)
+                    
+        if new_post_count > 0 and not is_first_run:
+            print(f"[{time.strftime('%H:%M:%S')}] 🔔 {user_name} 有 {new_post_count} 条新动态，已推送到微信！")
+        elif new_post_count == 0:
+            print(f"[{time.strftime('%H:%M:%S')}] 💤 {user_name} 暂无新动态。")
                 
     except Exception as e:
         print(f"[{time.strftime('%H:%M:%S')}] 网络请求发生异常: {e}")
@@ -136,16 +132,23 @@ def main():
     target_users = config['target_users']
     pushed_posts = load_history(history_file)
     
+    # 判断是否为首次运行，用来防止微信消息轰炸
+    is_first_run = len(pushed_posts) == 0
+    
     print(f"已加载 {len(pushed_posts)} 条历史记录。")
-    print("\n--- NGA 监控脚本 (API 终极防错版) 已启动 ---")
+    if is_first_run:
+        print("\n⚠️ 首次运行：为了防止 Server酱 额度被瞬间耗尽，第一轮检查将只把最新的帖子写入本地记录，**不会推送到微信**。")
+        
+    print("\n--- NGA 监控脚本 (完美终极版) 已启动 ---")
     
     while True:
         for uid, user_name in target_users.items():
             print(f"[{time.strftime('%H:%M:%S')}] 正在检查: {user_name} (UID: {uid})...")
-            check_nga_user_posts(uid, user_name, config, pushed_posts)
-            
-            # 搜索接口频率限制严格，延迟设为 5 秒
+            check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run)
             time.sleep(5) 
+            
+        # 第一轮遍历结束后，关闭首次运行标记。后续发现的才算真·新贴
+        is_first_run = False 
             
         print(f"[{time.strftime('%H:%M:%S')}] 本轮检查完毕，等待 {check_interval} 秒...\n")
         time.sleep(check_interval)
