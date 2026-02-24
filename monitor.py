@@ -147,4 +147,8 @@ def main():
             # 搜索接口频率限制严格，延迟设为 5 秒
             time.sleep(5) 
             
-        print(f"[{time.strftime('%H:%M:%S')}] 本轮检查完毕，等待 {
+        print(f"[{time.strftime('%H:%M:%S')}] 本轮检查完毕，等待 {check_interval} 秒...\n")
+        time.sleep(check_interval)
+
+if __name__ == "__main__":
+    main()
