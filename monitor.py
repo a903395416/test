@@ -68,18 +68,23 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run):
         data = res_json.get('data', {})
         items = []
         
-        def extract_posts(node):
-            if isinstance(node, dict):
-                if 'tid' in node and 'pid' in node:
-                    items.append(node)
-                else:
-                    for v in node.values():
-                        extract_posts(v)
-            elif isinstance(node, list):
-                for v in node:
-                    extract_posts(v)
-
-        extract_posts(data)
+        # 【精准提取】只锁定 NGA 存放真实回复的 __R 容器
+        replies_data = data.get('__R', {})
+        
+        if isinstance(replies_data, dict):
+            post_list = replies_data.values()
+        elif isinstance(replies_data, list):
+            post_list = replies_data
+        else:
+            post_list = []
+            
+        for post in post_list:
+            if isinstance(post, dict) and 'tid' in post and 'pid' in post:
+                # 【终极防穿透】严格比对发帖人 UID，识破并丢弃所有伪装的系统广告
+                post_author_id = str(post.get('authorid', ''))
+                if post_author_id and post_author_id != str(uid):
+                    continue 
+                items.append(post)
         
         if not items:
             print(f"[{time.strftime('%H:%M:%S')}] 💤 {user_name} 暂无新动态。")
@@ -93,7 +98,6 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run):
             if not tid:
                 continue
                 
-            # 【修复逻辑】：处理标题和内容为空的情况
             raw_subject = post.get('subject', '')
             raw_content = post.get('content', '')
             
@@ -103,7 +107,6 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run):
                 content_text = "[图片/表情/特殊格式内容]"
                 
             content_snippet = content_text[:100]
-            
             post_id = f"tid_{tid}_pid_{pid}"
             
             if post_id not in pushed_posts:
@@ -121,7 +124,6 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run):
                 message_content = f"你关注的用户 **{user_name}** {action}：\n\n**相关标题：** {subject}\n\n**具体内容：** {content_snippet}...\n\n[点击这里直达 NGA]({post_url})"
                 
                 if is_first_run:
-                    # 【修复日志】：打印正文的前20个字，而不是可能为空的标题
                     print(f"    🤫 静默收录: {content_text[:20]}...")
                 else:
                     send_to_wechat(sendkey, f"NGA更新: {user_name}", message_content)
@@ -148,7 +150,7 @@ def main():
     if is_first_run:
         print("\n⚠️ 首次运行：为了防止 Server酱 额度耗尽，第一轮检查将只把最新的帖子写入本地，**不会推送到微信**。")
         
-    print("\n--- NGA 监控脚本 (完美显示版) 已启动 ---")
+    print("\n--- NGA 监控脚本 (广告过滤纯净版) 已启动 ---")
     
     while True:
         for uid, user_name in target_users.items():
