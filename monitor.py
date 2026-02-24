@@ -68,17 +68,20 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run):
         data = res_json.get('data', {})
         items = []
         
-        # 【最终真理】不瞎找，也不死板。只提取 NGA 返回的以 "0", "1", "2" 等纯数字作为 Key 的字典
-        # 这样既能拿到所有历史发言，又能完美避开所有系统级的广告参数！
-        if isinstance(data, dict):
-            for k, post in data.items():
-                if str(k).isdigit() and isinstance(post, dict):
-                    if 'tid' in post and 'pid' in post:
-                        items.append(post)
-        elif isinstance(data, list):
-            for post in data:
-                if isinstance(post, dict) and 'tid' in post and 'pid' in post:
-                    items.append(post)
+        # 【融合技第一步：无差别地毯式搜索】
+        # 不管 NGA 怎么改版，怎么嵌套，只要数据里带有 tid 和 pid，全盘提取出来
+        def extract_posts(node):
+            if isinstance(node, dict):
+                if 'tid' in node and 'pid' in node:
+                    items.append(node)
+                else:
+                    for v in node.values():
+                        extract_posts(v)
+            elif isinstance(node, list):
+                for v in node:
+                    extract_posts(v)
+
+        extract_posts(data)
         
         if not items:
             print(f"[{time.strftime('%H:%M:%S')}] 💤 {user_name} 暂无新动态。")
@@ -88,7 +91,14 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run):
         for post in items:
             tid = post.get('tid', '')
             pid = post.get('pid', 0)
+            authorid = post.get('authorid', '')
             
+            # 【融合技第二步：极其严格的指纹过滤】
+            # 提取出来的东西，如果它的作者 UID 不是我们要查的 UID（比如 NGA 塞的广告或徽章）
+            # 直接跳过，看都不看一眼！
+            if str(authorid) != str(uid):
+                continue
+                
             if not tid:
                 continue
                 
@@ -145,7 +155,7 @@ def main():
     if is_first_run:
         print("\n⚠️ 首次运行：为了防止 Server酱 额度耗尽，第一轮检查将只把最新的帖子写入本地，**不会推送到微信**。")
         
-    print("\n--- NGA 监控脚本 (终极完美版) 已启动 ---")
+    print("\n--- NGA 监控脚本 (究极融合防弹版) 已启动 ---")
     
     while True:
         for uid, user_name in target_users.items():
