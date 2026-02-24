@@ -36,12 +36,13 @@ def send_to_wechat(sendkey, title, content):
         print(f"[{time.strftime('%H:%M:%S')}] 微信推送失败: {e}")
 
 def clean_html_tags(text):
+    if not text:
+        return ""
     cleanr = re.compile('<.*?>')
     cleantext = re.sub(cleanr, '', str(text))
     return cleantext.replace('&nbsp;', ' ').replace('&#39;', "'").strip()
 
 def check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run):
-    # 【核心修复】改为 NGA 官方的“用户历史回复”接口
     url = f"https://nga.178.com/thread.php?authorid={uid}&searchpost=1&__output=11"
     
     headers = {
@@ -61,7 +62,7 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run):
         try:
             res_json = response.json()
         except Exception as e:
-            print(f"[{time.strftime('%H:%M:%S')}] ⚠️ API返回了非JSON格式，可能是 Cookie 失效或触发了验证码。")
+            print(f"[{time.strftime('%H:%M:%S')}] ⚠️ API返回异常，可能是 Cookie 失效。")
             return
         
         data = res_json.get('data', {})
@@ -92,8 +93,16 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run):
             if not tid:
                 continue
                 
-            subject = clean_html_tags(post.get('subject', '无标题'))
-            content_snippet = clean_html_tags(post.get('content', ''))[:100]
+            # 【修复逻辑】：处理标题和内容为空的情况
+            raw_subject = post.get('subject', '')
+            raw_content = post.get('content', '')
+            
+            subject = clean_html_tags(raw_subject) if raw_subject else "未命名回复贴"
+            content_text = clean_html_tags(raw_content)
+            if not content_text:
+                content_text = "[图片/表情/特殊格式内容]"
+                
+            content_snippet = content_text[:100]
             
             post_id = f"tid_{tid}_pid_{pid}"
             
@@ -109,10 +118,11 @@ def check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run):
                     post_url = f"https://nga.178.com/read.php?tid={tid}&pid={pid}"
                     action = "发表了回复"
                     
-                message_content = f"你关注的用户 **{user_name}** {action}：\n\n**标题：** {subject}\n\n**内容摘要：** {content_snippet}...\n\n[点击这里直达 NGA]({post_url})"
+                message_content = f"你关注的用户 **{user_name}** {action}：\n\n**相关标题：** {subject}\n\n**具体内容：** {content_snippet}...\n\n[点击这里直达 NGA]({post_url})"
                 
                 if is_first_run:
-                    print(f"    🤫 静默收录历史发言: {subject[:15]}...")
+                    # 【修复日志】：打印正文的前20个字，而不是可能为空的标题
+                    print(f"    🤫 静默收录: {content_text[:20]}...")
                 else:
                     send_to_wechat(sendkey, f"NGA更新: {user_name}", message_content)
                     
@@ -132,14 +142,13 @@ def main():
     target_users = config['target_users']
     pushed_posts = load_history(history_file)
     
-    # 判断是否为首次运行，用来防止微信消息轰炸
     is_first_run = len(pushed_posts) == 0
     
     print(f"已加载 {len(pushed_posts)} 条历史记录。")
     if is_first_run:
-        print("\n⚠️ 首次运行：为了防止 Server酱 额度被瞬间耗尽，第一轮检查将只把最新的帖子写入本地记录，**不会推送到微信**。")
+        print("\n⚠️ 首次运行：为了防止 Server酱 额度耗尽，第一轮检查将只把最新的帖子写入本地，**不会推送到微信**。")
         
-    print("\n--- NGA 监控脚本 (完美终极版) 已启动 ---")
+    print("\n--- NGA 监控脚本 (完美显示版) 已启动 ---")
     
     while True:
         for uid, user_name in target_users.items():
@@ -147,7 +156,6 @@ def main():
             check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run)
             time.sleep(5) 
             
-        # 第一轮遍历结束后，关闭首次运行标记。后续发现的才算真·新贴
         is_first_run = False 
             
         print(f"[{time.strftime('%H:%M:%S')}] 本轮检查完毕，等待 {check_interval} 秒...\n")
