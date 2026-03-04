@@ -10,165 +10,122 @@ def load_config(config_path="config.json"):
             return json.load(f)
     except Exception as e:
         print(f"读取配置文件失败: {e}")
-        input("按回车键退出...")
         exit(1)
 
 def load_history(history_file):
-    if not os.path.exists(history_file):
+    if not os.path.exists(history_file): #
         return set()
     with open(history_file, 'r', encoding='utf-8') as f:
         return set(line.strip() for line in f if line.strip())
 
 def save_history(history_file, post_id):
     with open(history_file, 'a', encoding='utf-8') as f:
-        f.write(f"{post_id}\n")
+        f.write(f"{post_id}\n") #
 
 def send_to_wechat(sendkey, title, content):
+    """推送到微信 (Server酱)"""
     if not sendkey or "替换" in sendkey:
-        print("未配置有效的 Server酱 SendKey，跳过推送。")
         return
     url = f"https://sctapi.ftqq.com/{sendkey}.send"
     data = {"title": title, "desp": content}
     try:
         requests.post(url, data=data, timeout=10)
-        print(f"[{time.strftime('%H:%M:%S')}] 成功推送到微信: {title}")
-    except Exception as e:
-        print(f"[{time.strftime('%H:%M:%S')}] 微信推送失败: {e}")
+        print(f"[{time.strftime('%H:%M:%S')}] 成功推送到微信")
+    except:
+        print("微信推送失败")
+
+def send_to_feishu(webhook_url, title, content):
+    """推送到飞书机器人"""
+    if not webhook_url or "在这里填入" in webhook_url:
+        return
+    payload = {
+        "msg_type": "text",
+        "content": {
+            "text": f"🔔 {title}\n\n{content}"
+        }
+    }
+    try:
+        requests.post(webhook_url, json=payload, timeout=10)
+        print(f"[{time.strftime('%H:%M:%S')}] 成功推送到飞书")
+    except:
+        print("飞书推送失败")
 
 def clean_html_tags(text):
-    if not text:
-        return ""
+    if not text: return ""
     cleanr = re.compile('<.*?>')
     cleantext = re.sub(cleanr, '', str(text))
     return cleantext.replace('&nbsp;', ' ').replace('&#39;', "'").strip()
 
 def check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run):
     url = f"https://nga.178.com/thread.php?authorid={uid}&searchpost=1&__output=11"
-    
     headers = {
         "User-Agent": config['nga_settings']['user_agent'],
         "Cookie": config['nga_settings']['cookie'],
-        "Accept": "application/json, text/plain, */*",
         "Referer": "https://nga.178.com/"
     }
-    
-    history_file = config['monitor_settings']['history_file']
-    sendkey = config['push_service']['serverchan_sendkey']
     
     try:
         response = requests.get(url, headers=headers, timeout=15)
         response.encoding = 'gbk'
-        
-        try:
-            res_json = response.json()
-        except Exception as e:
-            print(f"[{time.strftime('%H:%M:%S')}] ⚠️ API返回异常，可能是 Cookie 失效。")
-            return
-        
+        res_json = response.json()
         data = res_json.get('data', {})
         items = []
         
-        # 【终极提取】：不屏蔽任何文件夹，地毯式搜索！
         def extract_posts(node):
             if isinstance(node, dict):
-                # 真实帖子的铁证：有tid、有pid，且必须包含content(正文)！
                 if 'tid' in node and 'pid' in node and 'content' in node:
-                    items.append(node)
-                
-                for v in node.values():
-                    extract_posts(v)
+                    try:
+                        if int(node['tid']) > 10000: items.append(node)
+                    except: pass
+                for v in node.values(): extract_posts(v)
             elif isinstance(node, list):
-                for v in node:
-                    extract_posts(v)
+                for v in node: extract_posts(v)
 
         extract_posts(data)
         
-        if not items:
-            print(f"[{time.strftime('%H:%M:%S')}] 💤 {user_name} 暂无新动态。")
-            return
-            
-        new_post_count = 0
         for post in items:
-            tid = post.get('tid', '')
-            pid = post.get('pid', 0)
-            authorid = post.get('authorid', '')
+            tid, pid, authorid = post.get('tid'), post.get('pid'), post.get('authorid')
+            if str(authorid) != str(uid): continue
             
-            # 【核心过滤 1】：作者必须是本人
-            if str(authorid) != str(uid):
-                continue
-                
-            # 【核心过滤 2】：过滤掉系统测试用的小于10000的幽灵ID
-            try:
-                if int(tid) < 10000:
-                    continue
-            except:
-                continue
-                
-            raw_subject = str(post.get('subject', ''))
-            raw_content = str(post.get('content', ''))
-            
-            subject = clean_html_tags(raw_subject) if raw_subject else "未命名回复贴"
-            content_text = clean_html_tags(raw_content)
-            if not content_text:
-                content_text = "[图片/表情/特殊格式内容]"
-                
-            content_snippet = content_text[:100]
-            
-            post_id = f"tid_{tid}_pid_{pid}"
-            
+            post_id = f"tid_{tid}_pid_{pid}" #
             if post_id not in pushed_posts:
                 pushed_posts.add(post_id)
-                save_history(history_file, post_id)
-                new_post_count += 1
+                save_history(config['monitor_settings']['history_file'], post_id)
                 
-                if str(pid) == "0":
-                    post_url = f"https://nga.178.com/read.php?tid={tid}"
-                    action = "发布了新帖"
+                content_text = clean_html_tags(post.get('content', ''))
+                if not content_text: content_text = "[图片/表情/特殊格式内容]"
+                
+                # 构造消息内容 (移除了直达链接)
+                action = "发布了新帖" if str(pid) == "0" else "发表了回复"
+                msg_title = f"{user_name} {action}"
+                msg_body = f"用户: {user_name}\n内容: {content_text}" # 这里显示完整内容
+                
+                if not is_first_run:
+                    # 同时支持微信和飞书推送
+                    send_to_wechat(config['push_service']['serverchan_sendkey'], msg_title, msg_body)
+                    send_to_feishu(config['push_service']['feishu_webhook'], msg_title, msg_body)
                 else:
-                    post_url = f"https://nga.178.com/read.php?tid={tid}&pid={pid}"
-                    action = "发表了回复"
+                    print(f"    🤫 静默收录: {user_name} 的历史记录")
                     
-                message_content = f"你关注的用户 **{user_name}** {action}：\n\n**相关标题：** {subject}\n\n**具体内容：** {content_snippet}...\n\n[点击这里直达 NGA]({post_url})"
-                
-                if is_first_run:
-                    print(f"    🤫 静默收录: {content_text[:20].replace(chr(10), ' ')}...")
-                else:
-                    send_to_wechat(sendkey, f"NGA更新: {user_name}", message_content)
-                    
-        if new_post_count > 0 and not is_first_run:
-            print(f"[{time.strftime('%H:%M:%S')}] 🔔 {user_name} 有 {new_post_count} 条新动态，已推送到微信！")
-        elif new_post_count == 0:
-            print(f"[{time.strftime('%H:%M:%S')}] 💤 {user_name} 暂无新动态。")
-                
     except Exception as e:
-        print(f"[{time.strftime('%H:%M:%S')}] 网络请求发生异常: {e}")
+        print(f"检查出错: {e}")
 
 def main():
-    print("加载配置文件...")
-    config = load_config("config.json")
+    config = load_config()
     history_file = config['monitor_settings']['history_file']
-    check_interval = config['monitor_settings']['check_interval']
-    target_users = config['target_users']
     pushed_posts = load_history(history_file)
-    
     is_first_run = len(pushed_posts) == 0
     
-    print(f"已加载 {len(pushed_posts)} 条历史记录。")
-    if is_first_run:
-        print("\n⚠️ 首次运行：为了防止 Server酱 额度耗尽，第一轮检查将只把最新的帖子写入本地，**不会推送到微信**。")
-        
-    print("\n--- NGA 监控脚本 (终极破壁版) 已启动 ---")
+    print(f"已加载 {len(pushed_posts)} 条历史记录")
+    print("\n--- NGA 监控脚本 (多平台推送版) 已启动 ---")
     
     while True:
-        for uid, user_name in target_users.items():
-            print(f"[{time.strftime('%H:%M:%S')}] 正在检查: {user_name} (UID: {uid})...")
+        for uid, user_name in config['target_users'].items():
+            print(f"[{time.strftime('%H:%M:%S')}] 检查: {user_name}...")
             check_nga_user_posts(uid, user_name, config, pushed_posts, is_first_run)
-            time.sleep(5) 
-            
+            time.sleep(5)
         is_first_run = False 
-            
-        print(f"[{time.strftime('%H:%M:%S')}] 本轮检查完毕，等待 {check_interval} 秒...\n")
-        time.sleep(check_interval)
+        time.sleep(config['monitor_settings']['check_interval'])
 
 if __name__ == "__main__":
     main()
